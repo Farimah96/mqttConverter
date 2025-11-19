@@ -3,146 +3,197 @@ import serial
 import time
 import threading
 
-
 mqttBroker = "127.0.0.1"
 mqttPort = 1883
+
 serialPort = "/dev/ttyAMA0"
 baudRate = 115200
 
-L1_command_topic = "home/automation/Light1/command"
-L1_status_topic = "home/automation/Light1/status"
-L2_command_topic = "home/automation/Light2/command"
-L2_status_topic = "home/automation/Light2/status"
-L3_command_topic = "home/automation/Light3/command"
-L3_status_topic = "home/automation/Light3/status"
-L4_command_topic = "home/automation/Light4/command"
-L4_status_topic = "home/automation/Light4/status"
-
-lights = {
-    L1_command_topic: [5, 1, 1],
-    L2_command_topic: [5, 1, 2],
-    L3_command_topic: [5, 1, 4],
-    L4_command_topic: [5, 1, 8],
-}
-
-temp_status_topic = "home/automation/Temperature/status"
-
-
-speed1 = "home/automation/FS/command"
-speed1_status = "home/automation/FS/status"
-# cooling_heating_command_topic = "home/automation/CH/command"
-# cooling_heating_status_topic = "home/automation/CH/status"
-# hand_auto_command_topic = "home/automation/HA/command"
-# hand_auto_status_topic = "home/automation/HA/status"
-# general_mode_command_topic = "home/automation/GM/command"
-# general_mode_status_topic = "home/automation/GM/status"
-# represent_temp_command_topic = "home/automation/RT/status"
-# desired_temp_command_topic = "home/automation/RS/command"
-# desired_temp_status_topic = "home/automation/RS/status"
-# cooling_valve_command_topic = "home/automation/CV/command"
-# cooling_valve_status_topic = "home/automation/CV/status"
-# heating_valve_command_topic = "home/automation/HV/command"
-# heating_valve_status_topic = "home/automation/HV/status"
-
-
-thermo = {
-    speed1 : [125, 0, 1],
-    # "speed 2": [125, 0, 2],
-    # "speed 3": [125, 0, 3],
-    # "off":     [125, 0, 0]
-}
-
 ser = serial.Serial(serialPort, baudRate, timeout=1)
 
-def on_connect(client, userdata, flags, rc):
-    print("Connected with result code " + str(rc))
-    for topic in lights.keys():
-        client.subscribe(topic)
-        
-    for topic in thermo.keys():
-        client.subscribe(topic)
-        
+################################## Features Configuration ##################################
+
+features = {
+    "lights": {
+        "home/automation/Light1/command": {"code": [5,1,1]},
+        "home/automation/Light2/command": {"code": [5,1,2]},
+        "home/automation/Light3/command": {"code": [5,1,4]},
+        "home/automation/Light4/command": {"code": [5,1,8]},
+    },
+
+    "fan": {
+        "home/automation/FS/command": {
+            "codeFS": [125,0,0],
+            "commands": {
+                "off": 0,
+                "speed1": 1,
+                "speed2": 2,
+                "speed3": 3
+            }
+        }
+    },
+
+    "temperature": {
+        "read_code": [125,2,26,0,0],
+        "status_topic": "home/automation/Temperature/status"
+    },
     
-################# light control ####################        
-def on_message_lights(client, userdata, msg):
-    print(msg.topic + " " + str(msg.payload))
-    if msg.topic in lights:
-
-        command = msg.payload.decode("utf-8").lower()
-        light_info = lights[msg.topic] if msg.topic in lights else None
-
-        serial_command = bytearray()
-        serial_command.append(light_info[0])
-        serial_command.append(light_info[1])
-        serial_command.append(light_info[2])
+    "generalMode": {
+        "home/automation/GM/command": {
+            "codeGM": [125,0,0],
+            "commands": {
+                "sunny": 9,
+                "snowy": 5
+            }
+        }
+    },
     
-        if command == "on":
-            serial_command[1] = 1
-        elif command == "off":
-            serial_command[1] = 2
-        else:
-            print("Unknown command:", command)
-            return
-        ser.write(serial_command)
-        status_topic = msg.topic.replace("command", "status")
-        client.publish(status_topic, command)
-            
-            
-        
+    "desiredTemp": {
+       "home/automation/RS/command": {
+           "codeRS": [125, 3, 0]
+       },
+       "status_topic": "home/automation/RS/status"
+    }
+}
 
-################ temperature reading ####################        
-temp_info = [125, 2, 26, 0, 0]
+################################## Light Handler ##################################
 
-def read_temperature():
+def handle_light(client, msg):
+    payload = msg.payload.decode().lower()
+    base_code = features["lights"][msg.topic]["code"]
+
+    cmd = bytearray(base_code)
+
+    if payload == "on":
+        cmd[1] = 1
+    elif payload == "off":
+        cmd[1] = 2
+    else:
+        print("Unknown light command:", payload)
+        return
+
+    ser.write(cmd)
+
+    status_topic = msg.topic.replace("command", "status")
+    client.publish(status_topic, payload)
+
+################################## Fan Handler ##################################
+
+def handle_fan(client, msg):
+    payload = msg.payload.decode().lower()
+    fan = features["fan"][msg.topic]
+
+    if payload not in fan["commands"]:
+        print("Unknown fan command:", payload)
+        return
+
+    speed = fan["commands"][payload]
+    cmd = bytearray(fan["codeFS"])
+    cmd[2] = speed
+
+    ser.write(cmd)
+
+    status_topic = msg.topic.replace("command", "status")
+    client.publish(status_topic, payload)
+    
+################################## General Mode Handler ##################################
+
+def handle_generalMode(client, msg):
+    payload = msg.payload.decode().lower()
+    generalMode = features["generalMode"][msg.topic]
+    
+    if payload not in generalMode["commands"]:
+        print("Unknown generalMode command:", payload)
+        return
+    
+    mode = generalMode["commands"][payload]
+    cmd = bytearray(generalMode["codeGM"])
+    cmd[2] = mode
+    
+    ser.write(cmd)
+    
+    status_topic = msg.topic.replace("command", "status")
+    client.publish(status_topic, payload)
+
+################################## Temperature Reader ##################################
+
+def temperature_reader():
+    read_cmd = bytearray(features["temperature"]["read_code"])
+    status_topic = features["temperature"]["status_topic"]
+
     while True:
-        serial_command = bytearray(temp_info)
-        ser.write(serial_command)
-        response = ser.read(5)
-        if len(response) == 5:
-            unknown_byte = response[3]
-            temp_value = unknown_byte / 2
-            print("Temperature:", temp_value)
-            client.publish(temp_status_topic, temp_value)
+        ser.write(read_cmd)
+        resp = ser.read(5)
+        
+        if len(resp) == 5:
+            temp_raw = resp[3]
+            temp_value = temp_raw / 2
+            client.publish(status_topic, temp_value)
+
         time.sleep(5)
 
-threading.Thread(target=read_temperature, daemon=True).start()
-     
-     
-################ fan control #################### 
-def on_message_thermo(client, userdata, msg):
-    print(msg.topic + " " + str(msg.payload))
-    if msg.topic in thermo:
-        
-        command = msg.payload.decode("utf-8").lower()
-        thermo_info = thermo[msg.topic] if msg.topic in thermo else None
+threading.Thread(target=temperature_reader, daemon=True).start()
 
-        serial_command = bytearray(thermo[command])
-        serial_command.append(thermo_info[0])
-        serial_command.append(thermo_info[1])
-        serial_command.append(thermo_info[2])
-        
-        if command == "speed 1":
-            serial_command[0] = 1
-            serial_command[1] = 0
-            serial_command[2] = 125
+################################## Desired Temp handler ##################################
+
+def handle_desiredTemp(client, msg):
+    try:
+        # OpenHAB sends numeric values like "20"
+        temp = float(msg.payload.decode())
+    except:
+        print("Invalid desired temperature:", msg.payload)
+        return
+
+    # Convert to device format: multiply by 2
+    temp_code_value = int(temp * 2)
+
+    feature = features["desiredTemp"][msg.topic]
+    cmd = bytearray(feature["codeRS"])
+    cmd[2] = temp_code_value
+
+    ser.write(cmd)
+
+    # Publish status back
+    status_topic = features["desiredTemp"]["status_topic"]
+    client.publish(status_topic, temp)
+
+
+
+################################## MQTT Setup ##################################
+
+topic_handlers = {}
+
+for t in features["lights"].keys():
+    topic_handlers[t] = handle_light
+
+for t in features["fan"].keys():
+    topic_handlers[t] = handle_fan
     
+for t in features["generalMode"].keys():
+    topic_handlers[t] = handle_generalMode
     
+for t in features["desiredTemp"].keys():
+    if t.endswith("command"):
+        topic_handlers[t] = handle_desiredTemp
 
 
+def on_connect(client, userdata, flags, rc):
+    print("Connected:", rc)
+    for topic in topic_handlers.keys():
+        client.subscribe(topic)
 
-################# On message dispatcher ####################
+
 def on_message(client, userdata, msg):
-    if msg.topic in lights:
-        on_message_lights(client, userdata, msg)
-    elif msg.topic in thermo:
-        on_message_thermo(client, userdata, msg)
+    handler = topic_handlers.get(msg.topic)
+    if handler:
+        handler(client, msg)
     else:
-        print("Unknown MQTT topic:", msg.topic)
-      
-            
-                
+        print("Unhandled topic:", msg.topic)
+
+
 client = mqtt.Client()
 client.on_connect = on_connect
 client.on_message = on_message
+
 client.connect(mqttBroker, mqttPort, 60)
 client.loop_forever()
