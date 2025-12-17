@@ -97,18 +97,21 @@ for idx, thing in enumerate(things, start=1):
         for ch in thing["channels"]:
             item_name = f"{thing['label'].replace(' ','')}_{ch['id']}"
 
-            item_payload = [
-                {
-                    "type": ch["itemType"],
-                    "name": item_name,
-                    "label": f"{thing['label']} {ch['label']}",
-                    "category": "lightbulb",
-                    "tags": ["Power", "Switch"],
-                    "groupNames": []
-                }
-            ]
+            item_payload = {
+                "type": ch["itemType"],
+                "name": item_name,
+                "label": f"{thing['label']} {ch['label']}",
+                "category": "lightbulb",
+                "tags": ["Power", "Switch"],
+                "groupNames": []
+            }
 
-            item_resp = requests.put(items_url, headers=headers, data=json.dumps(item_payload))
+            item_resp = requests.put(
+                f"{items_url}/{item_name}",
+                headers=headers,
+                data=json.dumps(item_payload)
+            )
+
             if item_resp.status_code in (200, 201):
                 print(f"    → Item '{item_name}' created successfully")
             elif item_resp.status_code == 409:
@@ -119,14 +122,12 @@ for idx, thing in enumerate(things, start=1):
 
 
             ch_uid_real = actual_channels[ch["id"]]
-            link_payload = {
-                "itemName": item_name,
-                "channelUID": ch['uid']
-            }
-            link_resp = requests.put("http://localhost:8080/rest/links", headers=headers, data=json.dumps(link_payload))
+            
+            link_url = f"http://localhost:8080/rest/links/{item_name}/{ch_uid_real}"
+            link_resp = requests.put(link_url, headers=headers)
 
             if link_resp.status_code in (200, 201):
-                print(f"    → Linked '{item_name}' to channel '{ch['uid']}'")
+                print(f"    → Linked '{item_name}' to channel '{ch_uid_real}'")
             else:
                 print(f"    → Link fail {link_resp.status_code}: {link_resp.text}")
 
